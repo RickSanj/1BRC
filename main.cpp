@@ -77,7 +77,7 @@ void print_output(std::unordered_map<std::string, StationData> &station_map, con
     std::vector<std::pair<std::string, StationData>> sorted_data(station_map.begin(), station_map.end());
     std::sort(sorted_data.begin(), sorted_data.end(), [](const auto &a, const auto &b) {
         return a.first < b.first;
-    });
+    });// parallel
 
     std::ofstream output(output_file);
     if (!output.is_open()) {
@@ -95,39 +95,61 @@ void print_output(std::unordered_map<std::string, StationData> &station_map, con
 
 void read_file_in_chunks(const std::string &input_file, const int &thread_count,
                          std::queue<std::vector<std::string>> &task_queue, size_t &chunk_size, std::mutex &queue_mutex,
-                         std::condition_variable &cv, std::queue<std::unordered_map<std::string, StationData>>& res_queue) {
-    std::ifstream input(input_file);
+                         std::condition_variable &cv) {
+    std::ifstream input(input_file, std::ios::binary);
 
     if (!input.is_open()) {
         std::cerr << "Failed to open the file." << std::endl;
         return;
     }
 
-    std::vector<std::string> chunk;
-    std::string line;
+    const size_t buffer_size = 50 * 1024 * 1024;
+    std::vector<char> buffer(buffer_size); // read into string
+    std::string temp_data;
+    std::vector<std::string> chunk(chunk_size);
 
     while (true) {
-        size_t current_chunk_size = 0;
-        while (current_chunk_size < chunk_size && std::getline(input, line)) {
-            chunk.push_back(line);
-            current_chunk_size++;
-        }
-
-        if (chunk.empty()) {
+        input.read(buffer.data(), buffer_size);
+        size_t bytes_read = input.gcount();
+        if (bytes_read == 0) {
             break;
         }
-        {
-            std::lock_guard<std::mutex> lock(queue_mutex);
-            task_queue.push(chunk);
+
+        temp_data.append(buffer.data(), bytes_read);
+
+        size_t start_pos = 0;
+        while (true) {
+            size_t end_pos = temp_data.find('\n', start_pos);
+
+            if (end_pos == std::string::npos) {
+                break;
+            }
+
+            //std::string line = temp_data.substr(start_pos, end_pos - start_pos); //copy?
+            chunk.emplace_back(temp_data.substr(start_pos, end_pos - start_pos));
+
+            start_pos = end_pos + 1;
         }
-        cv.notify_one();
-        chunk.clear();
+
+        if (start_pos < temp_data.size()) {
+            temp_data = temp_data.substr(start_pos);
+        } else {
+            temp_data.clear();
+        }
+
+        if (!chunk.empty()) {
+            {
+                std::lock_guard<std::mutex> lock(queue_mutex);
+                task_queue.push(chunk);
+            }
+            cv.notify_one();
+            chunk.clear();
+        }
     }
 
-    if (!line.empty()) {
-        chunk.push_back(line);
+    if (!temp_data.empty()) {
+        chunk.push_back(temp_data);
     }
-
     if (!chunk.empty()) {
         std::lock_guard<std::mutex> lock(queue_mutex);
         task_queue.push(chunk);
@@ -146,9 +168,12 @@ void read_file_in_chunks(const std::string &input_file, const int &thread_count,
 }
 
 
+
 void process_file(const std::string &input_file, const std::string &output_file, const int &thread_count) {
     std::unordered_map<std::string, StationData> station_map;
-    size_t chunk_size = 400000;
+//    size_t chunk_size = 400000;
+    size_t chunk_size = 1000; //1267
+
     std::vector<std::thread> workers;
     std::queue<std::vector<std::string>> task_queue;
     std::queue<std::unordered_map<std::string, StationData>> res_queue;
@@ -173,7 +198,7 @@ void process_file(const std::string &input_file, const std::string &output_file,
                              std::ref(res_cv),
                              std::ref(done));
 
-    read_file_in_chunks(input_file, thread_count, task_queue, chunk_size, queue_mutex, cv, res_queue);
+    read_file_in_chunks(input_file, thread_count, task_queue, chunk_size, queue_mutex, cv);
 
     for (auto &worker: workers) {
         worker.join();
@@ -202,6 +227,6 @@ int main(int argc, char *argv[]) {
     process_file(input, output, num_of_threads);
     auto end_time = get_current_time_fenced();
 
-    std::cout << to_s(end_time - start_time) << " seconds" << std::endl;
+    std::cout << to_s(end_time - start_time) << " milliseconds" << std::endl;
     return 0;
 }

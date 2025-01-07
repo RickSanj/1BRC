@@ -25,7 +25,7 @@ get_current_time_fenced() {
 
 template<class D>
 inline long long to_s(const D &d) {
-    return std::chrono::duration_cast<std::chrono::seconds>(d).count();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
 }
 
 struct StationData {
