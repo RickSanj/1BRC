@@ -11,6 +11,9 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <condition_variable>
+#include <iomanip>
+#include <algorithm>
 
 
 namespace fs = std::filesystem;

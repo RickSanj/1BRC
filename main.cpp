@@ -4,21 +4,22 @@
 #include "main.h"
 
 void process_chunk(const std::vector<std::string> &lines,
-                   std::mutex &res_queue_mutex, std::queue<std::unordered_map<std::string, StationData>>& res_queue) {
+                   std::mutex &res_queue_mutex, std::queue<std::unordered_map<std::string, StationData>>& res_queue, std::condition_variable &res_cv) {
     std::unordered_map<std::string, StationData> local_map;
 
     for (const auto &line: lines) {
         std::istringstream ss(line);
         std::string station, temp_str;
         if (std::getline(ss, station, ';') && std::getline(ss, temp_str)) {
-            double temp = std::stod(temp_str);
-            local_map[station].update(temp);
+//            double temp = std::stod(temp_str);
+            local_map[station].update(std::stod(temp_str));
         }
     }
     {
         std::lock_guard<std::mutex> lock(res_queue_mutex);
         res_queue.push(local_map);
     }
+    res_cv.notify_all();
 }
 
 
@@ -55,7 +56,8 @@ void worker_thread(
         std::mutex &queue_mutex,
         std::condition_variable &cv,
         std::mutex &res_queue_mutex,
-        std::queue<std::unordered_map<std::string, StationData>>& res_queue) {
+        std::queue<std::unordered_map<std::string, StationData>>& res_queue,
+        std::condition_variable &res_cv) {
     while (true) {
         std::vector<std::string> chunk;
         {
@@ -68,7 +70,7 @@ void worker_thread(
         if (chunk.empty()) {
             break;
         }
-        process_chunk(chunk, res_queue_mutex, res_queue);
+        process_chunk(chunk, res_queue_mutex, res_queue, res_cv);
     }
 }
 
@@ -77,7 +79,7 @@ void print_output(std::unordered_map<std::string, StationData> &station_map, con
     std::vector<std::pair<std::string, StationData>> sorted_data(station_map.begin(), station_map.end());
     std::sort(sorted_data.begin(), sorted_data.end(), [](const auto &a, const auto &b) {
         return a.first < b.first;
-    });// parallel
+    });
 
     std::ofstream output(output_file);
     if (!output.is_open()) {
@@ -159,7 +161,7 @@ void read_file_in_chunks(const std::string &input_file, const int &thread_count,
     for (int i = 0; i < thread_count; ++i) {
         {
             std::lock_guard<std::mutex> lock(queue_mutex);
-            task_queue.push({});
+            task_queue.emplace();
         }
         cv.notify_all();
     }
@@ -171,8 +173,7 @@ void read_file_in_chunks(const std::string &input_file, const int &thread_count,
 
 void process_file(const std::string &input_file, const std::string &output_file, const int &thread_count) {
     std::unordered_map<std::string, StationData> station_map;
-//    size_t chunk_size = 400000;
-    size_t chunk_size = 1000; //1267
+    size_t chunk_size = 10000;
 
     std::vector<std::thread> workers;
     std::queue<std::vector<std::string>> task_queue;
@@ -189,7 +190,8 @@ void process_file(const std::string &input_file, const std::string &output_file,
                              std::ref(queue_mutex),
                              std::ref(cv),
                              std::ref(res_queue_mutex),
-                             std::ref(res_queue));
+                             std::ref(res_queue),
+                             std::ref(res_cv));
     }
     std::thread merge_thread(merge_stations,
                              std::ref(station_map),
