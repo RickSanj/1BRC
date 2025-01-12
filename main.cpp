@@ -4,14 +4,14 @@
 #include "main.h"
 
 void process_chunk(const std::vector<std::string> &lines,
-                   std::mutex &res_queue_mutex, std::queue<std::unordered_map<std::string, StationData>>& res_queue, std::condition_variable &res_cv) {
+                   std::mutex &res_queue_mutex, std::queue<std::unordered_map<std::string, StationData>> &res_queue,
+                   std::condition_variable &res_cv) {
     std::unordered_map<std::string, StationData> local_map;
 
     for (const auto &line: lines) {
         std::istringstream ss(line);
         std::string station, temp_str;
         if (std::getline(ss, station, ';') && std::getline(ss, temp_str)) {
-//            double temp = std::stod(temp_str);
             local_map[station].update(std::stod(temp_str));
         }
     }
@@ -56,7 +56,7 @@ void worker_thread(
         std::mutex &queue_mutex,
         std::condition_variable &cv,
         std::mutex &res_queue_mutex,
-        std::queue<std::unordered_map<std::string, StationData>>& res_queue,
+        std::queue<std::unordered_map<std::string, StationData>> &res_queue,
         std::condition_variable &res_cv) {
     while (true) {
         std::vector<std::string> chunk;
@@ -106,7 +106,7 @@ void read_file_in_chunks(const std::string &input_file, const int &thread_count,
     }
 
     const size_t buffer_size = 50 * 1024 * 1024;
-    std::vector<char> buffer(buffer_size); // read into string
+    std::vector<char> buffer(buffer_size);
     std::string temp_data;
     std::vector<std::string> chunk(chunk_size);
 
@@ -127,7 +127,6 @@ void read_file_in_chunks(const std::string &input_file, const int &thread_count,
                 break;
             }
 
-            //std::string line = temp_data.substr(start_pos, end_pos - start_pos); //copy?
             chunk.emplace_back(temp_data.substr(start_pos, end_pos - start_pos));
 
             start_pos = end_pos + 1;
@@ -150,16 +149,18 @@ void read_file_in_chunks(const std::string &input_file, const int &thread_count,
     }
 
     if (!temp_data.empty()) {
-        chunk.push_back(temp_data);
+        chunk.push_back(std::move(temp_data));
     }
     if (!chunk.empty()) {
         std::lock_guard<std::mutex> lock(queue_mutex);
-        task_queue.push(chunk);
+        task_queue.push(std::move(chunk));
     }
     cv.notify_one();
 
+
     for (int i = 0; i < thread_count; ++i) {
         {
+            //emplace empty chunk, it is used as a poison pill
             std::lock_guard<std::mutex> lock(queue_mutex);
             task_queue.emplace();
         }
@@ -168,7 +169,6 @@ void read_file_in_chunks(const std::string &input_file, const int &thread_count,
 
     input.close();
 }
-
 
 
 void process_file(const std::string &input_file, const std::string &output_file, const int &thread_count) {
