@@ -11,7 +11,7 @@ https://github.com/RickSanj
 <mark>./compile.sh</mark>
 ### Usage
 
-./1BRC <input file> <output file> <number of threads>
+./1BRC input_file output_file number_of_threads
 
 ### Results
 
